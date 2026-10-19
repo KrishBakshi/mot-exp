@@ -72,3 +72,6 @@ credentials*.json
 .roboflow/
 runs/
 wandb/
+
+# --- Scratch ---
+tmp/
