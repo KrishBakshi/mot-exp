@@ -22,8 +22,9 @@ from mot_exp.device import select_device
 from mot_exp.progress import progress_bar
 from mot_exp.video_paths import REPO_ROOT, resolve_input_video, resolve_output_video
 
-# Ultralytics built-in ByteTrack config
-BYTETRACK = "bytetrack.yaml"
+# BoT-SORT: Kalman + CMC (sparseOptFlow) for camera motion / moving objects
+# See ultralytics/cfg/trackers/botsort.yaml (gmc_method: sparseOptFlow)
+BOTSORT = "botsort.yaml"
 
 
 def draw_solution_trajectories(segmenter: solutions.InstanceSegmentation, frame) -> None:
@@ -79,7 +80,7 @@ def annotate_frame(segmenter: solutions.InstanceSegmentation, frame):
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Ultralytics segmentation tracking (ByteTrack) with masks, boxes, confidence.",
+        description="Ultralytics segmentation tracking (BoT-SORT) with masks, boxes, confidence.",
     )
     parser.add_argument(
         "video",
@@ -104,7 +105,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     device = select_device()
     print(f"Inference device: {device}")
-    print(f"Tracker: ByteTrack ({BYTETRACK})")
+    print(f"Tracker: BoT-SORT ({BOTSORT}) with camera motion compensation")
     print(f"Trajectories: {args.trajectories}")
 
     tags = ["-trajectories"] if args.trajectories else []
@@ -125,7 +126,7 @@ def main(argv: list[str] | None = None) -> None:
     segmenter = solutions.InstanceSegmentation(
         model=args.model,
         device=device,
-        tracker=BYTETRACK,
+        tracker=BOTSORT,
         show=False,
         show_conf=True,
         show_labels=True,

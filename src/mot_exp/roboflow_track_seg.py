@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RF-DETR (Roboflow) segmentation tracking → annotated MP4 (ByteTrack + optional trails)."""
+"""RF-DETR (Roboflow) segmentation tracking → annotated MP4 (BoT-SORT + optional trails)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import cv2
 import supervision as sv
 import torch
 from rfdetr.assets.coco_classes import COCO_CLASSES
-from trackers import ByteTrackTracker
+from trackers import BoTSORTTracker, MotionAwareTraceAnnotator, MotionEstimator
 
 from mot_exp.annotate import (
     class_counts_from_ids,
@@ -26,7 +26,7 @@ TRAIL_LENGTH = 30
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="RF-DETR segmentation tracking (ByteTrack) with masks, boxes, confidence.",
+        description="RF-DETR segmentation tracking (BoT-SORT) with masks, boxes, confidence.",
     )
     parser.add_argument(
         "video",
@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     device = select_device()
     print(f"Inference device: {device}")
-    print("Tracker: ByteTrack (trackers.ByteTrackTracker)")
+    print("Tracker: BoT-SORT (CMC via sparseOptFlow) + MotionEstimator for trails")
     print(f"Trajectories: {args.trajectories}")
 
     tags = ["-trajectories"] if args.trajectories else []
@@ -103,13 +103,15 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Output: {output_path}")
 
     model = load_rfdetr_seg(args.model_size, device)
-    tracker = ByteTrackTracker()
+    # BoT-SORT with camera motion compensation (enable_cmc=True by default)
+    tracker = BoTSORTTracker(enable_cmc=True, cmc_method="sparseOptFlow")
     mask_annotator = sv.MaskAnnotator(opacity=0.5)
     box_annotator = sv.BoxAnnotator()
     label_annotator = sv.LabelAnnotator()
-    # Supervision TraceAnnotator — only used when --trajectories true
+    # Motion-aware trails stay stable under camera motion
+    motion_estimator = MotionEstimator() if args.trajectories else None
     trace_annotator = (
-        sv.TraceAnnotator(trace_length=TRAIL_LENGTH, thickness=4)
+        MotionAwareTraceAnnotator(trace_length=TRAIL_LENGTH, thickness=4)
         if args.trajectories
         else None
     )
@@ -140,7 +142,8 @@ def main(argv: list[str] | None = None) -> None:
                     break
 
                 detections = model.predict(frame, threshold=args.threshold)
-                detections = tracker.update(detections)
+                # Pass frame so BoT-SORT CMC can estimate camera motion
+                detections = tracker.update(detections, frame=frame)
 
                 class_ids = detections.class_id
                 confidences = detections.confidence
@@ -159,6 +162,9 @@ def main(argv: list[str] | None = None) -> None:
                             if tracker_ids is not None
                             else None
                         )
+                        # Skip unconfirmed BoT-SORT ids (-1) in labels
+                        if tid is not None and tid < 0:
+                            tid = None
                         labels.append(format_track_label(tid, name, conf))
 
                 frame = mask_annotator.annotate(scene=frame, detections=detections)
@@ -166,9 +172,12 @@ def main(argv: list[str] | None = None) -> None:
                 frame = label_annotator.annotate(
                     scene=frame, detections=detections, labels=labels
                 )
-                if trace_annotator is not None:
+                if trace_annotator is not None and motion_estimator is not None:
+                    coord_transform = motion_estimator.update(frame)
                     frame = trace_annotator.annotate(
-                        scene=frame, detections=detections
+                        scene=frame,
+                        detections=detections,
+                        coord_transform=coord_transform,
                     )
 
                 counts = class_counts_from_ids(
