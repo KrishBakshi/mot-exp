@@ -105,13 +105,25 @@ def main(argv: list[str] | None = None) -> None:
     model = load_rfdetr_seg(args.model_size, device)
     # BoT-SORT with camera motion compensation (enable_cmc=True by default)
     tracker = BoTSORTTracker(enable_cmc=True, cmc_method="sparseOptFlow")
-    mask_annotator = sv.MaskAnnotator(opacity=0.5)
-    box_annotator = sv.BoxAnnotator()
-    label_annotator = sv.LabelAnnotator()
+
+    # Color every overlay by tracker ID so each instance is distinct and
+    # masks / boxes / labels / trails share the same color per object.
+    palette = sv.ColorPalette.DEFAULT
+    track_colors = sv.ColorLookup.TRACK
+    mask_annotator = sv.MaskAnnotator(
+        color=palette, color_lookup=track_colors, opacity=0.5
+    )
+    box_annotator = sv.BoxAnnotator(color=palette, color_lookup=track_colors)
+    label_annotator = sv.LabelAnnotator(color=palette, color_lookup=track_colors)
     # Motion-aware trails stay stable under camera motion
     motion_estimator = MotionEstimator() if args.trajectories else None
     trace_annotator = (
-        MotionAwareTraceAnnotator(trace_length=TRAIL_LENGTH, thickness=4)
+        MotionAwareTraceAnnotator(
+            color=palette,
+            color_lookup=track_colors,
+            trace_length=TRAIL_LENGTH,
+            thickness=4,
+        )
         if args.trajectories
         else None
     )
@@ -145,6 +157,10 @@ def main(argv: list[str] | None = None) -> None:
                 # Pass frame so BoT-SORT CMC can estimate camera motion
                 detections = tracker.update(detections, frame=frame)
 
+                # Drop unconfirmed tracks (-1) so colors map cleanly by tracker ID
+                if detections.tracker_id is not None and len(detections) > 0:
+                    detections = detections[detections.tracker_id >= 0]
+
                 class_ids = detections.class_id
                 confidences = detections.confidence
                 tracker_ids = detections.tracker_id
@@ -162,18 +178,21 @@ def main(argv: list[str] | None = None) -> None:
                             if tracker_ids is not None
                             else None
                         )
-                        # Skip unconfirmed BoT-SORT ids (-1) in labels
-                        if tid is not None and tid < 0:
-                            tid = None
                         labels.append(format_track_label(tid, name, conf))
+
+                # Estimate camera motion on the raw frame before drawing overlays
+                coord_transform = (
+                    motion_estimator.update(frame)
+                    if motion_estimator is not None
+                    else None
+                )
 
                 frame = mask_annotator.annotate(scene=frame, detections=detections)
                 frame = box_annotator.annotate(scene=frame, detections=detections)
                 frame = label_annotator.annotate(
                     scene=frame, detections=detections, labels=labels
                 )
-                if trace_annotator is not None and motion_estimator is not None:
-                    coord_transform = motion_estimator.update(frame)
+                if trace_annotator is not None and coord_transform is not None:
                     frame = trace_annotator.annotate(
                         scene=frame,
                         detections=detections,
