@@ -1,0 +1,30 @@
+[project]
+name = "mot-exp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { email = "" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "inference>=1.8.0",
+    "ipykernel>=7.4.0",
+    "ipywidgets>=8.1.9",
+    "lap>=0.5.12",
+    # inference requires opencv 4.x (<4.13) and trackers 2.4.x
+    "opencv-python>=4.8.1.78,<4.13.0",
+    "rfdetr>=1.11.2",
+    "tqdm>=4.67.0",
+    "trackers>=2.4.0,<2.5",
+    "ultralytics>=8.4.182",
+]
+
+[project.scripts]
+mot-exp = "mot_exp:main"
+mot-ultralytics-track-seg = "mot_exp.ultralytics_track_seg:main"
+mot-roboflow-track-seg = "mot_exp.roboflow_track_seg:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
